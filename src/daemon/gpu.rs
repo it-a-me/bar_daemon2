@@ -10,7 +10,7 @@ impl RocmSmi {
     pub fn new(gpu_id: &str) -> Self {
         Self {
             gpu_id: gpu_id.to_string(),
-            fetch_cmd: Command::new("rocm-smi", vec!["-a", "--json"]),
+            fetch_cmd: Command::new("rocm-smi", &["-a", "--json"]),
         }
     }
 }
@@ -18,15 +18,11 @@ impl RocmSmi {
 #[async_trait]
 impl crate::Monitor for RocmSmi {
     async fn query(&mut self) -> Result<String, Error> {
-        let output = self.fetch_cmd.call().await?;
-        if let Ok(smi_json) = json::parse(output.trim()) {
-            let usage_percent = smi_json["card0"]["GPU use (%)"]
-                .as_u32()
-                .ok_or(Error::RocmSmi)?;
-            Ok(format!("GPU   {usage_percent}"))
-        } else {
-            Err(Error::RocmSmi)
-        }
+        let smi_json = self.fetch_cmd.call_as_json().await?;
+        let usage_percent = smi_json[&self.gpu_id]["GPU use (%)"]
+            .as_str()
+            .ok_or(Error::RocmSmi)?;
+        Ok(format!("GPU   {usage_percent}"))
     }
     async fn update(&mut self) -> Result<(), Error> {
         Ok(())

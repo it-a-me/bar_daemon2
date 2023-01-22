@@ -7,5 +7,5 @@ pub struct Args {
     #[arg(short, long, default_value_t = String::from(crate::network::DEFAULTPORT))]
     pub port: String,
     #[command(subcommand)]
-    pub query:crate::message::Message
+    pub query: crate::message::Message,
 }

@@ -1,18 +1,18 @@
 use crate::error;
 use thiserror::Error;
-
+#[derive(Clone)]
 pub struct Command {
     command: String,
     args: Vec<String>,
     full_command: String,
 }
 impl Command {
-    pub fn new(command: &str, args: Vec<&str>) -> Command {
+    pub fn new(command: &str, args: &[&str]) -> Command {
         let command = String::from(command);
         let args: Vec<String> = args.iter().map(|s| String::from(*s)).collect();
         let mut full_command = command.clone();
         for arg in &args {
-            full_command.push_str(&arg);
+            full_command.push_str(arg);
         }
         Self {
             command,
@@ -34,6 +34,10 @@ impl Command {
             },
         )
     }
+    pub async fn call_as_json(&self) -> Result<json::JsonValue, Error> {
+        json::parse(self.call().await?.trim())
+            .map_err(|e| Error::new(self.full_command.clone(), ErrorType::Json(e)))
+    }
 }
 
 #[derive(Error, Debug)]
@@ -54,6 +58,8 @@ impl Error {
 
 #[derive(Error, Debug)]
 pub enum ErrorType {
+    #[error("parse json '{0}'")]
+    Json(#[from] json::Error),
     #[error("{0}")]
     Call(std::io::Error),
     #[error("command returned invalid utf8")]

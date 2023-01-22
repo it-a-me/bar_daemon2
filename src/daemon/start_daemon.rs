@@ -1,15 +1,15 @@
+use crate::error::{self, Error};
 use crate::message::Message;
 use crate::parse_input::Args;
-use crate::Error;
 use log::{info, trace, warn};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 pub fn start_daemon(args: Args) -> Result<(), Error> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .enable_all()
         .build()
-        .map_err(crate::Error::Runtime)?
+        .map_err(error::Network::Runtime)?
         .block_on(daemon(args))?;
     Ok(())
 }
@@ -17,11 +17,11 @@ pub fn start_daemon(args: Args) -> Result<(), Error> {
 pub async fn daemon(args: Args) -> Result<(), Error> {
     use crate::network::LOCALHOST;
     trace!("runtime initalized");
-    let hashmap = init_monitor_map(&args)?;
+    let hashmap = init_monitor_map(&args);
     let host = format!("{LOCALHOST}:{}", args.port);
     let listener = tokio::net::TcpListener::bind(&host)
         .await
-        .map_err(|e| Error::Bind(host.clone(), e))?;
+        .map_err(|e| error::Network::Bind(host.clone(), e))?;
     trace!("daemon bount to host '{}'", &host);
     loop {
         if let Ok(connection) =
@@ -30,41 +30,47 @@ pub async fn daemon(args: Args) -> Result<(), Error> {
             use serde::Deserialize;
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             trace!("connection requested");
-            let (mut stream, addr) = connection.map_err(Error::Accept)?;
+            let (mut stream, addr) = connection.map_err(error::Network::Accept)?;
             trace!("request accepted from {addr}");
             let mut buffer = Vec::new();
-            let bytes_recived = stream.read_to_end(&mut buffer).await.map_err(Error::Read)?;
+            let bytes_recived = stream
+                .read_to_end(&mut buffer)
+                .await
+                .map_err(error::Network::Read)?;
             trace!("read {bytes_recived} from {addr}");
-            match bincode::deserialize::<crate::message::Message>(&buffer) {
-                Ok(message) => {
-                    trace!("message deserialized.  Connection is requesting {message:?}");
-                    match hashmap.get(&message) {
-                        Some(monitor) => {
-                            let mut lock = monitor.lock().unwrap();
-                            println!("unlocked");
-                            match lock.query().await {
-                                Ok(v) => {
-                                    stream.write(v.as_bytes()).await.map_err(Error::Write)?;
-                                }
-                                Err(e) => {
-                                    eprintln!("{}", e);
-                                    warn!("query failed");
-                                }
-                            };
-                        }
-                        None => {
-                            info!("no {message:?} configured for daemon");
-                        }
+            if let Ok(message) = bincode::deserialize::<crate::message::Message>(&buffer) {
+                trace!("message deserialized.  Connection is requesting {message:?}");
+                match hashmap.get(&message) {
+                    Some(monitor) => {
+                        let mut lock = monitor.lock().await;
+                        trace!("mutex unlocked");
+                        match lock.query().await {
+                            Ok(v) => {
+                                stream
+                                    .write(v.as_bytes())
+                                    .await
+                                    .map_err(error::Network::Write)?;
+                            }
+                            Err(e) => {
+                                eprintln!("{e}");
+                                warn!("query failed");
+                            }
+                        };
+                    }
+                    None => {
+                        info!("no {message:?} configured for daemon");
                     }
                 }
-                Err(_) => info!("invalid date format recived, ignoring"),
+            } else {
+                info!("invalid date format recived, ignoring");
             }
         }
         trace!("loop");
     }
 }
 
-fn init_monitor_map(args: &Args) -> Result<HashMap<Message, Box<Mutex<dyn Monitor>>>, Error> {
+fn init_monitor_map(args: &Args) -> HashMap<Message, Box<Mutex<dyn Monitor>>> {
+    use crate::message;
     let mut hashmap: HashMap<Message, Box<Mutex<dyn Monitor>>> = HashMap::new();
     if let Some(gpu) = args.gpu.clone() {
         hashmap.insert(
@@ -72,7 +78,17 @@ fn init_monitor_map(args: &Args) -> Result<HashMap<Message, Box<Mutex<dyn Monito
             Box::new(Mutex::new(crate::gpu::RocmSmi::new(&gpu))),
         );
     }
-    Ok(hashmap)
+    if let Some(network) = args.network.clone() {
+        hashmap.insert(
+            Message::Network(message::NetworkDirection::Up),
+            Box::new(Mutex::new(crate::link::Link::new(&network, message::NetworkDirection::Up))),
+        );
+        hashmap.insert(
+            Message::Network(message::NetworkDirection::Down),
+            Box::new(Mutex::new(crate::link::Link::new(&network, message::NetworkDirection::Down))),
+        );
+    }
+    hashmap
 }
 
 #[async_trait::async_trait]

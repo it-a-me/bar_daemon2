@@ -3,7 +3,7 @@ mod message;
 #[path = "../network.rs"]
 mod network;
 mod parse_input;
-use network::{LOCALHOST};
+use network::LOCALHOST;
 
 use clap::Parser;
 use std::io::{Read, Write};

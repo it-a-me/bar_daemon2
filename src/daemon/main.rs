@@ -7,13 +7,14 @@
 )]
 #![allow(unused_imports, dead_code)]
 mod error;
+mod gpu;
+mod link;
 #[path = "../message.rs"]
 mod message;
 #[path = "../network.rs"]
 mod network;
 mod parse_input;
 mod start_daemon;
-mod gpu;
 use clap::Parser;
 pub use error::Error;
 use log::{debug, error, info, log_enabled, Level};
